@@ -56,7 +56,9 @@ def make_handler(config, store, checker):
                                    "swedish": sum((r["sv_count"] or 0) > 0 for r in rows),
                                    "english_only": sum(r["sv_count"] == 0 and (r["en_count"] or 0) > 0 for r in rows),
                                    "none": sum(r["sv_count"] == 0 and r["en_count"] == 0 for r in rows),
-                                   "errors": sum(r["error"] is not None for r in rows),
+                                   "errors": sum(r["error"] is not None or r.get('release_error') is not None for r in rows),
+                                   "release_checked": sum(r.get('release_checked_at') is not None for r in rows),
+                                   "sv_release_match": sum(r.get('release_matches',{}).get('sv_candidates',0)>0 for r in rows),
                                 }})
                 return
             if path == "/api/movies":
