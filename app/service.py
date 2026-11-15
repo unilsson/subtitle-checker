@@ -5,13 +5,13 @@ from threading import Lock, Thread
 from time import sleep
 from .config import Settings
 from .database import Store
-from .providers import ProviderError, radarr_movies, opensubtitles_search
+from .providers import ProviderError, radarr_movies, opensubtitles_search, radarr_releases
 
 
 class Checker:
-    def __init__(self, config: Settings, store: Store, radarr=radarr_movies, search=opensubtitles_search):
+    def __init__(self, config: Settings, store: Store, radarr=radarr_movies, search=opensubtitles_search, releases=radarr_releases):
         self.config, self.store = config, store
-        self.radarr, self.search = radarr, search
+        self.radarr, self.search, self.releases = radarr, search, releases
         self._lock = Lock()
         self._state = {"running": False, "action": None, "total": 0, "done": 0,
                        "current": None, "errors": 0, "message": None, "finished_at": None}
@@ -64,31 +64,62 @@ class Checker:
             movies = [m for m in movies if m["id"] == movie_id]
             if not movies:
                 raise ProviderError("Filmen finns inte eller har redan en videofil")
-        if not force:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=self.config.cache_hours)
-            movies = [m for m in movies if not m["checked_at"] or datetime.fromisoformat(m["checked_at"]) < cutoff]
+        now = datetime.now(timezone.utc)
+        subtitle_cutoff = now - timedelta(hours=self.config.cache_hours)
+        release_cutoff = now - timedelta(hours=self.config.release_cache_hours)
+
+        def stale(value, cutoff):
+            if not value:
+                return True
+            try:
+                return datetime.fromisoformat(value) < cutoff
+            except ValueError:
+                return True
+
+        # Automatic release matching is part of each scan, but we respect both caches.
+        # Sort uncached releases first when MAX_SCAN_MOVIES limits the batch.
+        movies.sort(key=lambda m: (bool(m.get('release_checked_at')),
+                                   m.get('release_checked_at') or '', m['title'].casefold()))
+        movies = [m for m in movies if force or stale(m['checked_at'], subtitle_cutoff)
+                  or (self.config.check_releases and stale(m.get('release_checked_at'), release_cutoff))]
         if self.config.max_scan_movies and movie_id is None:
             movies = movies[:self.config.max_scan_movies]
         with self._lock:
-            self._state["total"] = len(movies)
+            self._state['total'] = len(movies)
+        release_requests = 0
+        release_skipped = 0
         for index, movie in enumerate(movies):
             with self._lock:
-                self._state["current"] = movie["title"]
-            try:
-                sv = self.search(self.config.opensubtitles_api_key, movie, "sv")
-                sleep(self.config.request_delay_ms / 1000)
-                en = self.search(self.config.opensubtitles_api_key, movie, "en")
-                self.store.result(movie["id"], sv, en, sv["method"])
-            except Exception as e:
-                self.store.error(movie["id"], str(e))
-                with self._lock:
-                    self._state["errors"] += 1
-            finally:
-                with self._lock:
-                    self._state["done"] = index + 1
-                sleep(self.config.request_delay_ms / 1000)
+                self._state['current'] = movie['title']
+            if force or stale(movie['checked_at'], subtitle_cutoff):
+                try:
+                    sv = self.search(self.config.opensubtitles_api_key, movie, 'sv')
+                    sleep(self.config.request_delay_ms / 1000)
+                    en = self.search(self.config.opensubtitles_api_key, movie, 'en')
+                    self.store.result(movie['id'], sv, en, sv['method'])
+                except Exception as e:
+                    self.store.error(movie['id'], str(e))
+                    with self._lock:
+                        self._state['errors'] += 1
+            needs_release = self.config.check_releases and (force or stale(movie.get('release_checked_at'), release_cutoff))
+            if needs_release and movie_id is None and self.config.max_release_searches and release_requests >= self.config.max_release_searches:
+                release_skipped += 1
+            elif needs_release:
+                release_requests += 1
+                try:
+                    data = self.releases(self.config.radarr_url, self.config.radarr_api_key, movie['id'])
+                    self.store.releases_result(movie['id'], data)
+                except Exception as e:
+                    self.store.releases_error(movie['id'], str(e))
+                    with self._lock:
+                        self._state['errors'] += 1
+            with self._lock:
+                self._state['done'] = index + 1
+            sleep(self.config.request_delay_ms / 1000)
         with self._lock:
-            self._state["message"] = f"Kontrollerade {len(movies)} filmer. Fel: {self._state['errors']}."
+            self._state["message"] = (f"Kontrollerade {len(movies)} filmer, {release_requests} Radarr-sökningar. "
+                                          f"Fel: {self._state['errors']}. "
+                                          + (f"Releaser kvar till nästa körning: {release_skipped}." if release_skipped else ""))
 
     def maybe_auto_scan(self):
         if not self.config.auto_scan_hours:

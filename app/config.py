@@ -21,6 +21,9 @@ class Settings:
     auto_scan_hours: int = _integer("AUTO_SCAN_HOURS", 0, 0)
     request_delay_ms: int = _integer("REQUEST_DELAY_MS", 500, 250)
     max_scan_movies: int = _integer("MAX_SCAN_MOVIES", 0, 0)
+    check_releases: bool = os.environ.get("CHECK_RELEASES", "true").strip().lower() in ("1", "true", "yes", "on")
+    release_cache_hours: int = _integer("RELEASE_CACHE_HOURS", 24, 1)
+    max_release_searches: int = _integer("MAX_RELEASE_SEARCHES", 20, 0)
 
     def diagnostics(self):
         return {
@@ -30,4 +33,7 @@ class Settings:
             "cache_hours": self.cache_hours,
             "auto_scan_hours": self.auto_scan_hours,
             "max_scan_movies": self.max_scan_movies,
+            "check_releases": self.check_releases,
+            "release_cache_hours": self.release_cache_hours,
+            "max_release_searches": self.max_release_searches,
         }

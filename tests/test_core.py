@@ -95,7 +95,7 @@ class DatabaseTests(unittest.TestCase):
         def search(key,movie,lang):
             calls.append(lang)
             return {'count':2 if lang=='sv' else 1,'results':[{'release':'X'}], 'method':'imdb'}
-        config=Settings(radarr_api_key='x',opensubtitles_api_key='k',db_path=self.store.path,request_delay_ms=0)
+        config=Settings(radarr_api_key='x',opensubtitles_api_key='k',db_path=self.store.path,request_delay_ms=0,check_releases=False)
         chk=Checker(config,self.store,search=search)
         chk._scan()
         self.assertEqual(calls,['sv','en'])
@@ -109,7 +109,7 @@ class DatabaseTests(unittest.TestCase):
         self.store.sync_movies([self.movie])
         self.store.result(42,{'count':1,'results':[]},{'count':1,'results':[]},'imdb')
         def fail(key,movie,lang): raise ProviderError('API down')
-        chk=Checker(Settings(opensubtitles_api_key='fake',request_delay_ms=0),self.store,search=fail)
+        chk=Checker(Settings(opensubtitles_api_key='fake',request_delay_ms=0,check_releases=False),self.store,search=fail)
         chk._scan(force=True)
         self.assertEqual(self.store.one_movie(42)['sv_count'],1)
         self.assertEqual(self.store.one_movie(42)['error'],'API down')

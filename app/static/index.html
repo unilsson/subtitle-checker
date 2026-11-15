@@ -2,7 +2,7 @@
 <html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Subtitle Checker</title><link rel="stylesheet" href="/style.css"></head>
 <body><div class="shell">
-  <header><div><div class="eyebrow">RADARR × OPENSUBTITLES</div><h1>Subtitle Checker <span>0.1</span></h1><p>Kontrollera svensk text innan du laddar ned filmen.</p></div><div class="badge">READ ONLY · RADARR</div></header>
+  <header><div><div class="eyebrow">RADARR × OPENSUBTITLES</div><h1>Subtitle Checker <span>0.2</span></h1><p>Kontrollera svensk text innan du laddar ned filmen.</p></div><div class="badge">READ ONLY · RADARR</div></header>
   <section class="action-bar">
     <button id="sync" class="button outline">↻ Synka filmer från Radarr</button>
     <button id="scan" class="button primary">⌕ Kontrollera undertexter</button>
@@ -15,9 +15,10 @@
     <div class="stat good"><label>Svenska hittades</label><strong id="stat-sv">–</strong></div>
     <div class="stat warn"><label>Endast engelska</label><strong id="stat-en">–</strong></div>
     <div class="stat"><label>Inga träffar</label><strong id="stat-none">–</strong></div>
+    <div class="stat good"><label>SV-match mot release</label><strong id="stat-svmatch">–</strong></div>
   </section>
-  <section class="panel"><div class="tools"><div><h2>Filmer i Radarr</h2><p id="subheading">Visar filmer som ännu saknar videofil.</p></div><div class="controls"><input id="query" type="search" placeholder="Sök på filmtitel …" aria-label="Sök film"><select id="filter" aria-label="Filtrera"><option value="all">Alla</option><option value="sv">Svenska finns</option><option value="en">Endast engelska</option><option value="none">Inga träffar</option><option value="unchecked">Inte kontrollerade</option><option value="error">Fel</option></select></div></div>
-  <div class="table-scroll"><table><thead><tr><th>Film</th><th>Svenska</th><th>Engelska</th><th>Senast kontrollerad</th><th></th></tr></thead><tbody id="movies"><tr><td colspan="5" class="empty">Läser Radarr-listan …</td></tr></tbody></table></div></section>
+  <section class="panel"><div class="tools"><div><h2>Filmer i Radarr</h2><p id="subheading">Visar filmer som ännu saknar videofil.</p></div><div class="controls"><input id="query" type="search" placeholder="Sök på filmtitel …" aria-label="Sök film"><select id="filter" aria-label="Filtrera"><option value="all">Alla</option><option value="sv">Svenska finns</option><option value="en">Endast engelska</option><option value="none">Inga träffar</option><option value="unchecked">Inte kontrollerade</option><option value="error">Fel</option><option value="svmatch">SV-match mot Radarr-release</option><option value="enmatch">EN-match mot Radarr-release</option><option value="unmatched">Inga matchade releaser</option></select></div></div>
+  <div class="table-scroll"><table><thead><tr><th>Film</th><th>Svenska</th><th>Engelska</th><th>Release-match</th><th>Senast kontrollerad</th><th></th></tr></thead><tbody id="movies"><tr><td colspan="6" class="empty">Läser Radarr-listan …</td></tr></tbody></table></div></section>
   <section id="details" class="panel details" hidden><div class="tools"><div><h2 id="detail-title">Undertexter</h2><p id="detail-meta"></p></div><button class="button outline small" id="close">Stäng</button></div><div id="detail-body"></div></section>
-  <footer>Kontrolltjänst – inga filmer eller undertexter laddas ned. En sökträff garanterar inte synk med vald release. <span id="updated"></span></footer>
+  <footer>Kontrolltjänst – inga filmer eller undertexter laddas ned. En releasenamnmatch är bara en uppskattning, inte verifierad synk. Radarr kan avvisa vissa releaser. <span id="updated"></span></footer>
 </div><script defer src="/app.js"></script></body></html>

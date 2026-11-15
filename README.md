@@ -139,3 +139,64 @@ DB_PATH=/tmp/subtitle-checker-dev.sqlite3 PORT=8097 \\
 - <https://blog.opensubtitles.com/opensubtitles/how-to-build-a-movie-subtitle-finder-cli-with-python-and-the-opensubtitles-api>
 
 Detta är en fristående privat tjänst och varken en officiell Radarr- eller OpenSubtitles-produkt.
+
+
+## Sprint 2: automatisk release-matchning (v0.2.0)
+
+När du klickar **Kontrollera undertexter** gör Subtitle Checker nu en **Radarr Interactive Search** via
+`GET /api/v3/release?movieId=<Radarr-ID>` för att jämföra tillgängliga releaser med
+OpenSubtitles-sökresultaten för samma film. Inga nedladdningar startas. Status i filmens detaljvy:
+
+- **Samma namn**: releasenamnet matchar efter normalisering, men synk är inte kontrollerad.
+- **Trolig**: exempelvis samma källa, upplösning och releasegrupp.
+- **Möjlig**: vissa namndelar matchar; manuell kontroll rekommenderas.
+- **Ingen nammatch**: inga säkra indicier bland de undertexter som sökningen returnerade.
+
+Systemet avvisar automatiskt en matchning som har **motsägande upplösning** (1080p mot
+2160p), **motsägande källa** (BluRay mot WEB-DL) eller **avvikande utgåva**
+(Extended mot vanlig). Releaser som **Radarr avvisar** visas i detaljvyn, men
+räknas inte som nedladdningsbara kandidater i summeringen. Att en release hittas
+betyder inte att just dess videofil kommer gå att ladda ned eller att tidskoderna
+garanterat stämmer.
+
+Sökt innehåll sparas i SQLite och uppdateras med separata cachetider:
+
+```dotenv
+CHECK_RELEASES=true
+RELEASE_CACHE_HOURS=24
+MAX_RELEASE_SEARCHES=20
+```
+
+`MAX_RELEASE_SEARCHES` begränsar automatiska sökningar **per omgång**, för att
+undvika att spamma indexers genom Radarr/Prowlarr. Använd **Kontrollera undertexter**
+igen för nästa omgång; de filmer som ännu saknar releasekontroll prioriteras.
+Ange `0` om du uttryckligen vill söka alla releaser vid en enda körning.
+En enskild film kan alltid kontrolleras via knappen i dess detaljvy.
+`MAX_SCAN_MOVIES` från tidigare version gäller fortfarande.
+`CHECK_RELEASES=false` avaktiverar Radarrs releaseanrop men behåller
+sökningarna hos OpenSubtitles.
+
+**Observera:** Vi jämför endast releasenamn i de första OpenSubtitles-resultaten
+(högst 50 per språk, plus en gräns på 200 releaser från Radarr). Därför innebär
+"Ingen nammatch" inte att rätt undertext saknas på hela OpenSubtitles. Undertexten
+kan också vara osynkroniserad trots namnmatchning.
+
+### Testa utvecklingsbranchen på ThinkPad
+
+```bash
+cd ~/Production/subtitle-checker
+git fetch origin
+git switch --track origin/sprint-2-release-matching
+# Behåll din befintliga SUBTITLE_CHECKER_PORT. Lägg ev. till variablerna ovan i .env.
+docker compose up -d --build
+docker compose logs --tail=50
+```
+
+Installationen uppgraderar den befintliga SQLite-databasen utan att radera film- och
+undertextinformationen. Din `.env` ligger kvar. Backa gärna upp `data` innan
+du provar en utvecklingsbranch.
+
+### API-underlag
+
+- Radarr: <https://radarr.video/docs/api/> – `GET /api/v3/release`
+- OpenSubtitles: <https://ai.opensubtitles.com/api-docs> – `GET /subtitles`

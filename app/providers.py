@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 OS_API = "https://api.opensubtitles.com/api/v1"
-AGENT = "SubtitleChecker v0.1.0"
+AGENT = "SubtitleChecker v0.2.0"
 
 
 class ProviderError(Exception):
@@ -114,4 +114,37 @@ def opensubtitles_search(key: str, movie: dict, language: str) -> dict:
     total = raw.get("total_count")
     if not isinstance(total, int) or total < len(results):
         total = len(results)
-    return {"count": total, "results": results[:5], "method": "imdb" if "imdb_id" in params else "title"}
+    return {"count": total, "results": results[:50], "method": "imdb" if "imdb_id" in params else "title",
+            "incomplete": total > len(results)}
+
+def radarr_releases(base: str, api_key: str, movie_id: int) -> dict:
+    """Read-only Radarr Interactive Search for one EXISTING movie id."""
+    if not api_key:
+        raise ProviderError("RADARR_API_KEY saknas")
+    if type(movie_id) is not int or movie_id < 1:
+        raise ProviderError("Ogiltigt Radarr movieId")
+    payload = request_json(f"{base}/api/v3/release?{urlencode({'movieId': movie_id})}",
+                           {"X-Api-Key": api_key}, timeout=90)
+    if not isinstance(payload, list):
+        raise ProviderError("Radarr returnerade inte en lista med releaser")
+    items = []
+    for row in payload[:200]:
+        if not isinstance(row, dict):
+            continue
+        quality = row.get('quality') or {}
+        q = quality.get('quality') or {} if isinstance(quality, dict) else {}
+        if not isinstance(q, dict):
+            q = {}
+        reasons = row.get('rejections') or []
+        if not isinstance(reasons, list):
+            reasons = []
+        items.append({
+            'title': str(row.get('title') or '')[:320],
+            'indexer': str(row.get('indexer') or '')[:120],
+            'quality': str(q.get('name') or '')[:80],
+            'size': row.get('size') if type(row.get('size')) is int else None,
+            'rejected': bool(row.get('rejected') or reasons),
+            'rejections': [str(reason)[:150] for reason in reasons[:4]],
+            'protocol': str(row.get('protocol') or '')[:30],
+        })
+    return {'count': len(payload), 'releases': items, 'incomplete': len(payload) > len(items)}

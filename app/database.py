@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from .matching import compare_releases
 
 
 def utcnow() -> str:
@@ -49,6 +50,16 @@ class Store:
                 error TEXT
             )""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_movies_missing ON movies(has_file, checked_at)")
+            # Upgrade existing v0.1.0 databases without dropping user data.
+            cols = {r[1] for r in c.execute("PRAGMA table_info(movies)")}
+            for col, sql_type in {
+                'release_checked_at': 'TEXT', 'release_count': 'INTEGER',
+                'releases_json': 'TEXT', 'matched_json': 'TEXT',
+                'release_error': 'TEXT', 'release_incomplete': 'INTEGER',
+                'subtitles_incomplete': 'INTEGER',
+            }.items():
+                if col not in cols:
+                    c.execute(f"ALTER TABLE movies ADD COLUMN {col} {sql_type}")
 
     def sync_movies(self, movies: list[dict]) -> dict:
         ids = []
@@ -80,7 +91,14 @@ class Store:
                     results_json=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title
                          THEN NULL ELSE movies.results_json END,
                     error=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title
-                         THEN NULL ELSE movies.error END
+                         THEN NULL ELSE movies.error END,
+                    release_checked_at=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title THEN NULL ELSE movies.release_checked_at END,
+                    release_count=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title THEN NULL ELSE movies.release_count END,
+                    releases_json=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title THEN NULL ELSE movies.releases_json END,
+                    matched_json=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title THEN NULL ELSE movies.matched_json END,
+                    release_error=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title THEN NULL ELSE movies.release_error END,
+                    subtitles_incomplete=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title THEN NULL ELSE movies.subtitles_incomplete END,
+                    release_incomplete=CASE WHEN movies.imdb_id IS NOT excluded.imdb_id OR movies.title IS NOT excluded.title THEN NULL ELSE movies.release_incomplete END
                 """, (movie_id,title,year,imdb,monitored,has_file,now))
             # Prune deleted Radarr entries only on a successful, fully parsed sync.
             if ids:
@@ -106,17 +124,46 @@ class Store:
             x["results"] = json.loads(x.pop("results_json") or "{}")
         except json.JSONDecodeError:
             x["results"] = {}
+        try:
+            x['release_matches'] = json.loads(x.pop('matched_json') or '{}')
+        except json.JSONDecodeError:
+            x['release_matches'] = {}
+        x.pop('releases_json', None)  # Full raw release cache never leaves the API.
+        x['release_incomplete'] = bool(x.get('release_incomplete'))
+        x['subtitles_incomplete'] = bool(x.get('subtitles_incomplete'))
         x["has_file"] = bool(x["has_file"])
         x["monitored"] = bool(x["monitored"])
         return x
 
     def result(self, movie_id: int, sv: dict, en: dict, method: str):
+        subtitles = {"sv": sv["results"], "en": en["results"]}
         with self.conn() as c:
+            row = c.execute("SELECT releases_json FROM movies WHERE id=?", (movie_id,)).fetchone()
+            existing_releases = json.loads(row['releases_json'] or '[]') if row else []
+            matched = compare_releases(existing_releases, subtitles) if row and row['releases_json'] else {}
             c.execute("""UPDATE movies SET checked_at=?, sv_count=?, en_count=?,
-                  match_method=?, results_json=?, error=NULL WHERE id=?""",
+                  match_method=?, results_json=?, error=NULL, subtitles_incomplete=?, matched_json=? WHERE id=?""",
                   (utcnow(), sv["count"], en["count"], method,
-                   json.dumps({"sv": sv["results"], "en": en["results"]}, ensure_ascii=False),movie_id))
+                   json.dumps(subtitles, ensure_ascii=False),
+                   int(bool(sv.get('incomplete') or en.get('incomplete'))),
+                   json.dumps(matched, ensure_ascii=False), movie_id))
 
     def error(self, movie_id: int, message: str):
         with self.conn() as c:
             c.execute("UPDATE movies SET error=? WHERE id=?", (str(message)[:500], movie_id))
+
+    def releases_result(self, movie_id: int, data: dict):
+        """Commit release data and recompute matches against the cached subtitles."""
+        with self.conn() as c:
+            row = c.execute('SELECT results_json, checked_at FROM movies WHERE id=?', (movie_id,)).fetchone()
+            subtitles = json.loads((row['results_json'] if row else '') or '{}')
+            matched = (compare_releases(data['releases'], subtitles)
+                       if row and row['checked_at'] else {})
+            c.execute("""UPDATE movies SET release_checked_at=?, release_count=?,
+                        releases_json=?, release_incomplete=?, matched_json=?, release_error=NULL WHERE id=?""",
+                (utcnow(), data['count'], json.dumps(data['releases'], ensure_ascii=False),
+                 int(bool(data.get('incomplete'))), json.dumps(matched, ensure_ascii=False),movie_id))
+
+    def releases_error(self, movie_id: int, message: str):
+        with self.conn() as c:
+            c.execute('UPDATE movies SET release_error=? WHERE id=?', (str(message)[:500], movie_id))
