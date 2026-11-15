@@ -1,0 +1,16 @@
+services:
+  subtitle-checker:
+    build: .
+    container_name: subtitle-checker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8097"
+      DB_PATH: /data/subtitle-checker.sqlite3
+    ports:
+      - "${SUBTITLE_CHECKER_BIND:-0.0.0.0}:${SUBTITLE_CHECKER_PORT:-8097}:8097"
+    volumes:
+      - ./data:/data
+    # Radarr and this container need not share a Docker network when
+    # RADARR_URL points to the ThinkPad host IP / accessible service URL.
